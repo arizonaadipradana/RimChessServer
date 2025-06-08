@@ -1411,54 +1411,57 @@ io.on("connection", (socket) => {
   } catch (error) {
     console.error("Cancel matchmaking error:", error);
   }
-});
 
-// Enhanced disconnect handler with better error reporting
-socket.on("disconnect", (reason) => {
-  try {
-    const client = connectedClients.get(socket.id);
-    if (client) {
-      const transport = client.transport || socket.conn.transport.name;
-      const connectionDuration = (
-        (Date.now() - client.connectedAt) /
-        1000
-      ).toFixed(1);
+  // Enhanced disconnect handler with better error reporting
+  socket.on("disconnect", (reason) => {
+    try {
+      const client = connectedClients.get(socket.id);
+      if (client) {
+        const transport = client.transport || socket.conn.transport.name;
+        const connectionDuration = (
+          (Date.now() - client.connectedAt) /
+          1000
+        ).toFixed(1);
 
-      console.log(
-        `Client disconnected: ${client.username} (${socket.id}) - Reason: ${reason} - Transport: ${transport} - Duration: ${connectionDuration}s`
-      );
-
-      // Log additional disconnect context
-      if (reason === "transport error") {
         console.log(
-          `Transport error details for ${client.username}: Last transport was ${transport}`
+          `Client disconnected: ${client.username} (${socket.id}) - Reason: ${reason} - Transport: ${transport} - Duration: ${connectionDuration}s`
         );
+
+        // Log additional disconnect context
+        if (reason === "transport error") {
+          console.log(
+            `Transport error details for ${client.username}: Last transport was ${transport}`
+          );
+        }
+
+        cleanupClient(socket.id, client.username);
+      } else {
+        console.log(
+          `Unknown client disconnected: ${socket.id} - Reason: ${reason}`
+        );
+        connectionHeartbeats.delete(socket.id);
       }
-
-      cleanupClient(socket.id, client.username);
-    } else {
-      console.log(
-        `Unknown client disconnected: ${socket.id} - Reason: ${reason}`
-      );
-      connectionHeartbeats.delete(socket.id);
+    } catch (error) {
+      console.error("Disconnect handler error:", error);
     }
-  } catch (error) {
-    console.error("Disconnect handler error:", error);
-  }
-});
+  });
 
-// Enhanced connection error handler
-socket.on("error", (error) => {
-  const client = connectedClients.get(socket.id);
-  const username = client ? client.username : "unknown";
-  console.error(`Socket error for ${username} (${socket.id}):`, error.message);
-});
+  // Enhanced connection error handler
+  socket.on("error", (error) => {
+    const client = connectedClients.get(socket.id);
+    const username = client ? client.username : "unknown";
+    console.error(
+      `Socket error for ${username} (${socket.id}):`,
+      error.message
+    );
+  });
 
-// Connection close handler
-socket.on("close", (reason) => {
-  const client = connectedClients.get(socket.id);
-  const username = client ? client.username : "unknown";
-  console.log(`Socket closed for ${username} (${socket.id}): ${reason}`);
+  // Connection close handler
+  socket.on("close", (reason) => {
+    const client = connectedClients.get(socket.id);
+    const username = client ? client.username : "unknown";
+    console.log(`Socket closed for ${username} (${socket.id}): ${reason}`);
+  });
 });
 
 // Enhanced health check endpoint
