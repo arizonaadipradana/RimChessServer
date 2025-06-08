@@ -1659,7 +1659,7 @@ app.get("/players/:userId/suggested-opponents", async (req, res) => {
 app.get("/info", (req, res) => {
   res.json({
     server: "RimChess Multiplayer Server",
-    version: "1.3.0-Enhanced-ELO",
+    version: "1.0.0",
     uptime: Math.floor(process.uptime()),
     connections: connectedClients.size,
     games: {
@@ -1685,30 +1685,7 @@ app.get("/info", (req, res) => {
     ],
   });
 });
-res.json({
-  server: "RimChess Multiplayer Server",
-  version: "1.2.0-Enhanced",
-  uptime: Math.floor(process.uptime()),
-  connections: connectedClients.size,
-  games: {
-    waiting: waitingGames.length,
-    active: activeGames.size,
-    total: "N/A", // Could query database for total
-  },
-  transports: ["websocket", "polling"],
-  features: [
-    "Enhanced connection stability",
-    "Transport fallback",
-    "Connection monitoring",
-    "Auto-cleanup",
-    "Heartbeat tracking",
-    "CHECKMATE DETECTION",
-    "TIMER MANAGEMENT",
-    "PROPER RESIGNATION HANDLING",
-    "REAL-TIME TIMER SYNC",
-  ],
-});
-// NEW: Game status endpoint for debugging
+
 app.get("/games", (req, res) => {
   const gamesList = [];
 
