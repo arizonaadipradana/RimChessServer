@@ -8,6 +8,7 @@ const Redis = require("ioredis");
 const { v4: uuidv4 } = require("uuid");
 const cors = require("cors");
 const {
+  getUserById,
   generateBoardVisualization,
   findCheckingPieces,
   findKingSquare,
@@ -316,8 +317,8 @@ async function endGameByCheckmate(gameId, winnerId, loserId, finalFen) {
     });
 
     // Get player usernames
-    const winnerUser = await getUserById(winnerId);
-    const loserUser = await getUserById(loserId);
+    const winnerUser = await getUserById(winnerId, db);
+    const loserUser = await getUserById(loserId, db);
 
     // Stop game timer
     const game = activeGames.get(gameId);
@@ -350,7 +351,7 @@ async function endGameByCheckmate(gameId, winnerId, loserId, finalFen) {
       gameDuration: Math.floor(
         (Date.now() - (game?.startTime || Date.now())) / 1000
       ),
-      eloChanges: await calculateEloChanges(winnerId, loserId), // NEW: ELO updates
+      eloChanges: await calculateEloChanges(winnerId, loserId, db), // NEW: ELO updates
     };
 
     // Send to all players in the game room
@@ -360,7 +361,7 @@ async function endGameByCheckmate(gameId, winnerId, loserId, finalFen) {
     );
 
     // Update player ELOs
-    await updatePlayerElos(winnerId, loserId, gameOverData.eloChanges);
+    await updatePlayerElos(winnerId, loserId, gameOverData.eloChanges, db);
 
     // Clean up
     activeGames.delete(gameId);
@@ -399,8 +400,8 @@ async function endGameByResignation(gameId, resignedPlayerId) {
     });
 
     // Get player usernames
-    const winnerUser = await getUserById(winnerId);
-    const resignedUser = await getUserById(resignedPlayerId);
+    const winnerUser = await getUserById(winnerId, db);
+    const resignedUser = await getUserById(resignedPlayerId, db);
 
     // Stop game timer
     if (game.timer) {
@@ -453,8 +454,8 @@ async function endGameByTimeout(gameId, winnerId, timedOutPlayerId) {
     });
 
     // Get player usernames
-    const winnerUser = await getUserById(winnerId);
-    const timedOutUser = await getUserById(timedOutPlayerId);
+    const winnerUser = await getUserById(winnerId, db);
+    const timedOutUser = await getUserById(timedOutPlayerId, db);
 
     // Stop game timer
     const game = activeGames.get(gameId);
@@ -486,16 +487,6 @@ async function endGameByTimeout(gameId, winnerId, timedOutPlayerId) {
   } catch (error) {
     console.error(`Error ending game by timeout: ${error}`);
   }
-}
-
-// Helper function to get user by ID
-async function getUserById(userId) {
-  return new Promise((resolve, reject) => {
-    db.get("SELECT * FROM users WHERE id = ?", [userId], (err, user) => {
-      if (err) reject(err);
-      else resolve(user);
-    });
-  });
 }
 
 // CRITICAL FIX: Enhanced checkmate detection function
@@ -1387,30 +1378,6 @@ io.on("connection", (socket) => {
       console.error("Cancel matchmaking error:", error);
     }
   });
-  try {
-    connectionHeartbeats.set(socket.id, Date.now());
-    const client = connectedClients.get(socket.id);
-    if (!client) return;
-
-    const gameIndex = waitingGames.findIndex(
-      (g) => g.creatorId === client.userId
-    );
-    if (gameIndex !== -1) {
-      const game = waitingGames[gameIndex];
-      waitingGames.splice(gameIndex, 1);
-
-      // Clean up database
-      db.run("DELETE FROM games WHERE id = ? AND status = ?", [
-        game.gameId,
-        "waiting",
-      ]);
-
-      socket.emit("matchmaking_cancelled");
-      console.log(`Matchmaking cancelled by ${client.username}`);
-    }
-  } catch (error) {
-    console.error("Cancel matchmaking error:", error);
-  }
 
   // Enhanced disconnect handler with better error reporting
   socket.on("disconnect", (reason) => {
@@ -1585,7 +1552,7 @@ app.get("/players/:userId/suggested-opponents", async (req, res) => {
     }
 
     // Get requesting player's ELO
-    const requestingPlayer = await getUserById(userId);
+    const requestingPlayer = await getUserById(userId, db);
     if (!requestingPlayer) {
       return res.status(404).json({ error: "Player not found" });
     }
@@ -1659,7 +1626,7 @@ app.get("/players/:userId/suggested-opponents", async (req, res) => {
 app.get("/info", (req, res) => {
   res.json({
     server: "RimChess Multiplayer Server",
-    version: "1.0.0",
+    version: "1.3.0-Enhanced-ELO",
     uptime: Math.floor(process.uptime()),
     connections: connectedClients.size,
     games: {
@@ -1686,6 +1653,7 @@ app.get("/info", (req, res) => {
   });
 });
 
+// NEW: Game status endpoint for debugging
 app.get("/games", (req, res) => {
   const gamesList = [];
 
@@ -1735,7 +1703,7 @@ app.get("/users/:userId/stats", async (req, res) => {
       return res.status(400).json({ error: "Invalid user ID" });
     }
 
-    const user = await getUserById(userId);
+    const user = await getUserById(userId, db);
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }

@@ -147,11 +147,21 @@ function getAttackedSquares(chess) {
   }
 }
 
+// Helper function to get user by ID
+async function getUserById(userId, db) {
+  return new Promise((resolve, reject) => {
+    db.get('SELECT * FROM users WHERE id = ?', [userId], (err, user) => {
+      if (err) reject(err);
+      else resolve(user);
+    });
+  });
+}
+
 // NEW: Calculate ELO changes for game result
-async function calculateEloChanges(winnerId, loserId) {
+async function calculateEloChanges(winnerId, loserId, db) {
   try {
-    const winner = await getUserById(winnerId);
-    const loser = await getUserById(loserId);
+    const winner = await getUserById(winnerId, db);
+    const loser = await getUserById(loserId, db);
     
     if (!winner || !loser) {
       console.error('Could not find players for ELO calculation');
@@ -193,7 +203,7 @@ async function calculateEloChanges(winnerId, loserId) {
 }
 
 // NEW: Update player ELOs in database
-async function updatePlayerElos(winnerId, loserId, eloChanges) {
+async function updatePlayerElos(winnerId, loserId, eloChanges, db) {
   try {
     if (!eloChanges.winnerChange && !eloChanges.loserChange) return;
     
@@ -231,6 +241,7 @@ async function updatePlayerElos(winnerId, loserId, eloChanges) {
 }
 
 module.exports = {
+  getUserById,
   generateBoardVisualization,
   findCheckingPieces,
   findKingSquare,
