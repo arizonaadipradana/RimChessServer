@@ -339,11 +339,18 @@ async function endGameByCheckmate(gameId, winnerId, loserId, finalFen) {
       lastMove: game?.chess?.history({ verbose: true })?.slice(-1)[0] || null,
     };
 
-    // CRITICAL FIX: Notify BOTH players about checkmate with visual data
+    // CRITICAL FIX: Calculate ELO changes BEFORE creating game over data
+    const eloChanges = await calculateEloChanges(winnerId, loserId, db);
+    
+    // Update player ELOs in database first
+    await updatePlayerElos(winnerId, loserId, eloChanges, db);
+
+    // CRITICAL FIX: Notify BOTH players about checkmate with visual data AND ELO updates
     const gameOverData = {
       gameId,
       result: "checkmate",
       winner: winnerUser?.username || "Unknown",
+      loser: loserUser?.username || "Unknown",
       reason: "checkmate",
       finalFen: finalFen,
       checkmateVisualization: checkmateVisualization, // NEW: Visual board data
@@ -351,17 +358,19 @@ async function endGameByCheckmate(gameId, winnerId, loserId, finalFen) {
       gameDuration: Math.floor(
         (Date.now() - (game?.startTime || Date.now())) / 1000
       ),
-      eloChanges: await calculateEloChanges(winnerId, loserId, db), // NEW: ELO updates
+      eloChanges: eloChanges, // NEW: ELO updates
+      winnerEloChange: eloChanges.winnerChange,
+      loserEloChange: eloChanges.loserChange,
+      winnerNewElo: eloChanges.winnerNewElo,
+      loserNewElo: eloChanges.loserNewElo
     };
 
     // Send to all players in the game room
     io.to(gameId).emit("game_over", gameOverData);
     console.log(
-      `Checkmate notification sent to both players in game ${gameId} with visual board data`
+      `Checkmate notification sent to both players in game ${gameId} with visual board data and ELO updates`
     );
-
-    // Update player ELOs
-    await updatePlayerElos(winnerId, loserId, gameOverData.eloChanges, db);
+    console.log(`ELO changes applied: Winner: ${winnerUser?.username} +${eloChanges.winnerChange} (${eloChanges.winnerNewElo}), Loser: ${loserUser?.username} ${eloChanges.loserChange} (${eloChanges.loserNewElo})`);
 
     // Clean up
     activeGames.delete(gameId);
@@ -403,16 +412,23 @@ async function endGameByResignation(gameId, resignedPlayerId) {
     const winnerUser = await getUserById(winnerId, db);
     const resignedUser = await getUserById(resignedPlayerId, db);
 
+    // CRITICAL FIX: Calculate ELO changes for resignation
+    const eloChanges = await calculateEloChanges(winnerId, resignedPlayerId, db);
+    
+    // Update player ELOs in database first
+    await updatePlayerElos(winnerId, resignedPlayerId, eloChanges, db);
+
     // Stop game timer
     if (game.timer) {
       game.timer.stop();
     }
 
-    // CRITICAL FIX: Notify BOTH players with correct winner/loser information
+    // CRITICAL FIX: Notify BOTH players with correct winner/loser information AND ELO updates
     const gameOverData = {
       gameId,
       result: "resignation",
       winner: winnerUser?.username || "Unknown",
+      loser: resignedUser?.username || "Unknown",
       reason: "resignation",
       resignedPlayer: resignedUser?.username || "Unknown",
       totalMoves: game?.chess?.history()?.length || 0,
@@ -420,6 +436,11 @@ async function endGameByResignation(gameId, resignedPlayerId) {
         (Date.now() - (game?.startTime || Date.now())) / 1000
       ),
       finalFen: game?.chess?.fen() || null,
+      eloChanges: eloChanges,
+      winnerEloChange: eloChanges.winnerChange,
+      loserEloChange: eloChanges.loserChange,
+      winnerNewElo: eloChanges.winnerNewElo,
+      loserNewElo: eloChanges.loserNewElo
     };
 
     // Send to all players in the game room
@@ -427,6 +448,7 @@ async function endGameByResignation(gameId, resignedPlayerId) {
     console.log(
       `Resignation notification sent: ${resignedUser?.username} resigned, ${winnerUser?.username} wins`
     );
+    console.log(`ELO changes applied: Winner: ${winnerUser?.username} +${eloChanges.winnerChange} (${eloChanges.winnerNewElo}), Loser: ${resignedUser?.username} ${eloChanges.loserChange} (${eloChanges.loserNewElo})`);
 
     // Clean up
     activeGames.delete(gameId);
@@ -457,17 +479,24 @@ async function endGameByTimeout(gameId, winnerId, timedOutPlayerId) {
     const winnerUser = await getUserById(winnerId, db);
     const timedOutUser = await getUserById(timedOutPlayerId, db);
 
+    // CRITICAL FIX: Calculate ELO changes for timeout
+    const eloChanges = await calculateEloChanges(winnerId, timedOutPlayerId, db);
+    
+    // Update player ELOs in database first
+    await updatePlayerElos(winnerId, timedOutPlayerId, eloChanges, db);
+
     // Stop game timer
     const game = activeGames.get(gameId);
     if (game && game.timer) {
       game.timer.stop();
     }
 
-    // Notify both players
+    // CRITICAL FIX: Notify both players with ELO updates
     const gameOverData = {
       gameId,
       result: "timeout",
       winner: winnerUser?.username || "Unknown",
+      loser: timedOutUser?.username || "Unknown",
       reason: "timeout",
       timedOutPlayer: timedOutUser?.username || "Unknown",
       totalMoves: game?.chess?.history()?.length || 0,
@@ -475,12 +504,18 @@ async function endGameByTimeout(gameId, winnerId, timedOutPlayerId) {
         (Date.now() - (game?.startTime || Date.now())) / 1000
       ),
       finalFen: game?.chess?.fen() || null,
+      eloChanges: eloChanges,
+      winnerEloChange: eloChanges.winnerChange,
+      loserEloChange: eloChanges.loserChange,
+      winnerNewElo: eloChanges.winnerNewElo,
+      loserNewElo: eloChanges.loserNewElo
     };
 
     io.to(gameId).emit("game_over", gameOverData);
     console.log(
       `Timeout notification sent: ${timedOutUser?.username} timed out, ${winnerUser?.username} wins`
     );
+    console.log(`ELO changes applied: Winner: ${winnerUser?.username} +${eloChanges.winnerChange} (${eloChanges.winnerNewElo}), Loser: ${timedOutUser?.username} ${eloChanges.loserChange} (${eloChanges.loserNewElo})`);
 
     // Clean up
     activeGames.delete(gameId);
@@ -1351,7 +1386,106 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Handle cancel matchmaking
+  // NEW: Handle leaderboard data request
+  socket.on("request_leaderboard", async (data) => {
+    try {
+      connectionHeartbeats.set(socket.id, Date.now());
+      
+      const limit = parseInt(data?.limit) || 20;
+      const offset = parseInt(data?.offset) || 0;
+      const requestId = data?.requestId || "unknown";
+      
+      console.log(`Leaderboard request: limit=${limit}, offset=${offset}, requestId=${requestId}`);
+
+      // Get leaderboard data from database
+      const leaderboard = await new Promise((resolve, reject) => {
+        db.all(
+          `
+          SELECT 
+            username,
+            elo,
+            games_played,
+            games_won,
+            CASE 
+              WHEN games_played > 0 THEN ROUND((CAST(games_won AS FLOAT) / games_played) * 100, 1)
+              ELSE 0 
+            END as win_rate,
+            last_login,
+            created_at,
+            CASE
+              WHEN elo >= 2400 THEN 'Grandmaster'
+              WHEN elo >= 2200 THEN 'Master' 
+              WHEN elo >= 2000 THEN 'Expert'
+              WHEN elo >= 1800 THEN 'Advanced'
+              WHEN elo >= 1600 THEN 'Intermediate'
+              WHEN elo >= 1400 THEN 'Improving'
+              WHEN elo >= 1200 THEN 'Casual'
+              WHEN elo >= 1000 THEN 'Beginner'
+              WHEN elo >= 800 THEN 'Novice'
+              ELSE 'Learning'
+            END as skill_level
+          FROM users 
+          WHERE games_played >= 1  -- Include all players with at least 1 game
+          ORDER BY elo DESC, games_won DESC, games_played ASC
+          LIMIT ? OFFSET ?
+        `,
+          [limit, offset],
+          (err, rows) => {
+            if (err) reject(err);
+            else resolve(rows || []);
+          }
+        );
+      });
+
+      // Add ranking positions
+      const rankedLeaderboard = leaderboard.map((player, index) => ({
+        rank: offset + index + 1,
+        username: player.username,
+        elo: player.elo,
+        gamesPlayed: player.games_played,
+        gamesWon: player.games_won,
+        winRate: player.win_rate,
+        skillLevel: player.skill_level,
+        isOnline: Array.from(connectedClients.values()).some(
+          (client) => client.username === player.username
+        ),
+      }));
+
+      // Get total count
+      const totalCount = await new Promise((resolve, reject) => {
+        db.get(
+          "SELECT COUNT(*) as count FROM users WHERE games_played >= 1",
+          (err, row) => {
+            if (err) reject(err);
+            else resolve(row?.count || 0);
+          }
+        );
+      });
+
+      const responseData = {
+        entries: rankedLeaderboard,
+        totalCount: totalCount,
+        limit: limit,
+        offset: offset,
+        requestId: requestId,
+        generatedAt: new Date().toISOString(),
+      };
+
+      socket.emit("leaderboard_data", responseData);
+      console.log(`Leaderboard sent: ${rankedLeaderboard.length} entries, total: ${totalCount}`);
+      
+    } catch (error) {
+      console.error("Error handling leaderboard request:", error);
+      socket.emit("leaderboard_data", {
+        entries: [],
+        totalCount: 0,
+        limit: data?.limit || 20,
+        offset: data?.offset || 0,
+        requestId: data?.requestId || "unknown",
+        error: "Server error fetching leaderboard"
+      });
+    }
+  });
   socket.on("cancel_matchmaking", () => {
     try {
       connectionHeartbeats.set(socket.id, Date.now());
